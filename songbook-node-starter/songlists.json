@@ -1,0 +1,12 @@
+[
+  {
+    "id": "sunday-am-sample",
+    "title": "Sunday AM Sample",
+    "notes": "Starter example set list",
+    "songIds": [
+      "into-my-heart",
+      "reach-out-and-touch-the-lord",
+      "thank-you-lord-for-saving-my-soul"
+    ]
+  }
+]

@@ -1,0 +1,403 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Service Builder</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    body { font-family: Arial, sans-serif; margin: 0; background: #f4f6f8; color: #1e1e1e; }
+    .wrap { max-width: 1400px; margin: 0 auto; padding: 20px; }
+    .grid { display: grid; grid-template-columns: 340px 1fr 380px; gap: 20px; }
+    .panel { background: #fff; border-radius: 14px; padding: 16px; box-shadow: 0 1px 4px rgba(0,0,0,.08); }
+    input, textarea, button, select { font: inherit; width: 100%; box-sizing: border-box; margin-bottom: 10px; padding: 10px; }
+    button { cursor: pointer; width: auto; }
+    .row { display: flex; gap: 10px; flex-wrap: wrap; }
+    .row > * { flex: 1; }
+    .item, .song { border: 1px solid #e7e7e7; border-radius: 10px; padding: 10px; margin-bottom: 10px; background:#fff; }
+    .small { color: #666; font-size: 13px; }
+    .order-item { background: #fafafa; }
+    .preview { background: #111; color: #fff; border-radius: 12px; padding: 16px; min-height: 220px; }
+    .preview-line { font-size: 34px; line-height: 1.45; margin: 8px 0; }
+    .muted { color: #777; }
+    .dragging { opacity: .5; }
+    .drop-target { outline: 2px dashed #1e88e5; }
+    label { display:block; font-size: 12px; color:#666; margin-bottom: 4px; }
+    .qrbox { text-align: center; }
+    .qrbox img { max-width: 240px; width: 100%; height: auto; border-radius: 12px; background: white; padding: 10px; box-sizing: border-box; }
+    .qrlink { font-size: 12px; word-break: break-all; color: #555; }
+    @media (max-width: 1100px) { .grid { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Service Builder</h1>
+  <p class="small">Drag items to reorder. Each song item can transpose for projector and set a separate musician key override without changing the master song.</p>
+
+  <div class="grid">
+    <div class="panel">
+      <h3>Saved Service Orders</h3>
+      <div id="orders"></div>
+      <button id="newOrderBtn">New Service Order</button>
+    </div>
+
+    <div class="panel">
+      <h3>Service Order</h3>
+      <div class="row">
+        <input id="orderId" placeholder="service-order-id" />
+        <input id="orderTitle" placeholder="Service title" />
+      </div>
+      <div class="row">
+        <input id="orderDate" placeholder="Date" />
+        <input id="orderNotes" placeholder="Notes" />
+      </div>
+
+      <h4>Add Song</h4>
+      <input id="songSearch" placeholder="Search songs..." />
+      <div id="songs"></div>
+
+      <h4>Add Custom Item</h4>
+      <input id="customTitle" placeholder="Welcome / Prayer / Offering / Message" />
+      <textarea id="customNotes" rows="4" placeholder="One line per projector slide line"></textarea>
+      <button id="addCustomBtn">Add Custom Item</button>
+
+      <h4>Current Items</h4>
+      <div id="currentItems"></div>
+
+      <div class="row">
+        <button id="saveBtn">Save Service Order</button>
+        <button id="projectorBtn">Open Service Projector</button>
+        <button id="liveBtn">Open Live Preview</button>
+        <button id="remoteBtn">Open Phone Remote</button>
+      </div>
+      <pre id="status">Ready.</pre>
+    </div>
+
+    <div class="panel">
+      <h3>Current Item Preview</h3>
+      <div class="preview">
+        <div id="previewTitle" class="muted">Preview</div>
+        <div id="previewLines"></div>
+      </div>
+
+      <h3>QR Pairing</h3>
+      <div class="small">Save the order, then scan this QR code with your phone to open the correct remote instantly.</div>
+      <input id="baseUrl" placeholder="Optional base URL, e.g. https://your-vercel-site.vercel.app" />
+      <div class="row">
+        <button id="qrBtn">Generate QR</button>
+      </div>
+      <div class="qrbox">
+        <img id="qrImage" alt="QR code will appear here" />
+        <div id="qrLink" class="qrlink"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+let songs = [];
+let orders = [];
+let currentItems = [];
+let currentOrderId = "";
+let dragIndex = null;
+
+const ordersEl = document.getElementById("orders");
+const songsEl = document.getElementById("songs");
+const currentItemsEl = document.getElementById("currentItems");
+const statusEl = document.getElementById("status");
+const previewTitleEl = document.getElementById("previewTitle");
+const previewLinesEl = document.getElementById("previewLines");
+
+function setStatus(value) {
+  statusEl.textContent = typeof value === "string" ? value : JSON.stringify(value, null, 2);
+}
+
+async function loadSongs() {
+  const res = await fetch("/songs");
+  const data = await res.json();
+  songs = data.songs || [];
+  renderSongs("");
+}
+
+async function loadOrders() {
+  const res = await fetch("/service-orders");
+  const data = await res.json();
+  orders = data.orders || [];
+  renderOrders();
+}
+
+function renderOrders() {
+  ordersEl.innerHTML = orders.map(order => `
+    <div class="item">
+      <strong>${order.title}</strong><br>
+      <span class="small">${order.id}</span><br>
+      <button onclick="openOrder('${order.id}')">Open</button>
+    </div>
+  `).join("");
+}
+
+function renderSongs(query) {
+  const q = (query || "").toLowerCase();
+  const filtered = songs.filter(song =>
+    !q ||
+    song.title.toLowerCase().includes(q) ||
+    String(song.songNumber || "").includes(q) ||
+    (song.scriptures || []).join(" ").toLowerCase().includes(q)
+  );
+
+  songsEl.innerHTML = filtered.map(song => `
+    <div class="song">
+      <strong>${song.songNumber ? song.songNumber + ". " : ""}${song.title}</strong><br>
+      <span class="small">${song.key || ""} ${(song.scriptures || []).join(", ")}</span><br>
+      <button onclick="addSong('${song.id}')">Add</button>
+    </div>
+  `).join("");
+}
+
+function renderCurrentItems() {
+  currentItems = currentItems.map((item, i) => ({ ...item, position: i + 1 }));
+
+  currentItemsEl.innerHTML = currentItems.map((item, idx) => `
+    <div class="item order-item" draggable="true" data-index="${idx}">
+      <strong>${idx + 1}. ${item.title || item.songId || "Item"}</strong><br>
+      <span class="small">${item.type}${item.songId ? " • " + item.songId : ""}</span>
+      ${item.type === "song" ? `
+        <div class="row">
+          <div>
+            <label>Projector transpose</label>
+            <input type="number" value="${item.transpose || 0}" onchange="updateSongField(${idx}, 'transpose', this.value)" />
+          </div>
+          <div>
+            <label>Musician key override</label>
+            <input type="text" value="${item.musicianKeyOverride || ""}" placeholder="Optional, e.g. A" onchange="updateSongField(${idx}, 'musicianKeyOverride', this.value)" />
+          </div>
+        </div>
+      ` : `
+        <div class="small">Custom item</div>
+      `}
+      <div class="row">
+        <button onclick="previewItem(${idx})">Preview</button>
+        <button onclick="removeItem(${idx})">Remove</button>
+      </div>
+    </div>
+  `).join("");
+
+  attachDragHandlers();
+}
+
+function attachDragHandlers() {
+  const items = document.querySelectorAll("[data-index]");
+  items.forEach(el => {
+    el.addEventListener("dragstart", () => {
+      dragIndex = Number(el.dataset.index);
+      el.classList.add("dragging");
+    });
+    el.addEventListener("dragend", () => {
+      el.classList.remove("dragging");
+      document.querySelectorAll(".drop-target").forEach(x => x.classList.remove("drop-target"));
+    });
+    el.addEventListener("dragover", (e) => {
+      e.preventDefault();
+      el.classList.add("drop-target");
+    });
+    el.addEventListener("dragleave", () => {
+      el.classList.remove("drop-target");
+    });
+    el.addEventListener("drop", (e) => {
+      e.preventDefault();
+      const dropIndex = Number(el.dataset.index);
+      reorderItems(dragIndex, dropIndex);
+      el.classList.remove("drop-target");
+    });
+  });
+}
+
+function reorderItems(from, to) {
+  if (from == null || to == null || from === to) return;
+  const moved = currentItems.splice(from, 1)[0];
+  currentItems.splice(to, 0, moved);
+  renderCurrentItems();
+}
+
+function addSong(songId) {
+  const song = songs.find(s => s.id === songId);
+  currentItems.push({
+    type: "song",
+    songId,
+    title: song ? song.title : songId,
+    position: currentItems.length + 1,
+    notes: "",
+    transpose: 0,
+    musicianKeyOverride: ""
+  });
+  renderCurrentItems();
+}
+
+function addCustomItem() {
+  const title = document.getElementById("customTitle").value.trim();
+  const notes = document.getElementById("customNotes").value.trim();
+  if (!title) {
+    setStatus("Custom item title is required.");
+    return;
+  }
+  currentItems.push({
+    type: "custom",
+    title,
+    notes,
+    position: currentItems.length + 1,
+    transpose: 0,
+    musicianKeyOverride: ""
+  });
+  document.getElementById("customTitle").value = "";
+  document.getElementById("customNotes").value = "";
+  renderCurrentItems();
+}
+
+function updateSongField(index, field, value) {
+  if (!currentItems[index]) return;
+  currentItems[index][field] = field === "transpose" ? Number(value || 0) : value;
+}
+
+function removeItem(index) {
+  currentItems.splice(index, 1);
+  renderCurrentItems();
+}
+
+async function previewItem(index) {
+  const item = currentItems[index];
+  if (!item) return;
+
+  if (item.type === "custom") {
+    previewTitleEl.textContent = item.title;
+    previewLinesEl.innerHTML = String(item.notes || "")
+      .split(/\r?\n/)
+      .filter(Boolean)
+      .map(line => `<div class="preview-line">${line}</div>`)
+      .join("");
+    return;
+  }
+
+  const orderPayload = {
+    title: "Preview",
+    date: "",
+    notes: "",
+    items: [item]
+  };
+
+  await fetch(`/service-orders/__preview__`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(orderPayload)
+  });
+  const view = await fetch(`/service-orders/__preview__/view`);
+  const data = await view.json();
+  const previewItem = (data.items || [])[0];
+  previewTitleEl.textContent = `${previewItem.songNumber ? previewItem.songNumber + ". " : ""}${previewItem.title}${previewItem.projectorKey ? " • Projector " + previewItem.projectorKey : ""}${previewItem.musicianKey ? " • Musician " + previewItem.musicianKey : ""}`;
+  const slide = (previewItem.slides || [])[0] || { lines: [] };
+  previewLinesEl.innerHTML = slide.lines.map(line => `<div class="preview-line">${line}</div>`).join("");
+}
+
+async function saveOrder() {
+  const orderId = document.getElementById("orderId").value.trim();
+  const title = document.getElementById("orderTitle").value.trim();
+  const date = document.getElementById("orderDate").value.trim();
+  const notes = document.getElementById("orderNotes").value.trim();
+
+  if (!orderId) {
+    setStatus("Order id is required.");
+    return;
+  }
+
+  const payload = {
+    title: title || orderId,
+    date,
+    notes,
+    items: currentItems.map((item, i) => ({ ...item, position: i + 1 }))
+  };
+
+  const res = await fetch(`/service-orders/${orderId}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload)
+  });
+  const data = await res.json();
+  currentOrderId = orderId;
+  setStatus(data);
+  await loadOrders();
+}
+
+async function openOrder(id) {
+  const res = await fetch(`/service-orders/${id}`);
+  const data = await res.json();
+  currentOrderId = data.id;
+  document.getElementById("orderId").value = data.id;
+  document.getElementById("orderTitle").value = data.title || "";
+  document.getElementById("orderDate").value = data.date || "";
+  document.getElementById("orderNotes").value = data.notes || "";
+  currentItems = (data.items || []).slice().sort((a,b) => (a.position || 0) - (b.position || 0));
+  renderCurrentItems();
+  setStatus(`Loaded ${data.title}`);
+}
+
+function newOrder() {
+  currentOrderId = "";
+  document.getElementById("orderId").value = "";
+  document.getElementById("orderTitle").value = "";
+  document.getElementById("orderDate").value = "";
+  document.getElementById("orderNotes").value = "";
+  currentItems = [];
+  renderCurrentItems();
+  previewTitleEl.textContent = "Preview";
+  previewLinesEl.innerHTML = "";
+  document.getElementById("qrImage").removeAttribute("src");
+  document.getElementById("qrLink").textContent = "";
+  setStatus("New service order.");
+}
+
+function openProjector() {
+  const id = document.getElementById("orderId").value.trim();
+  if (!id) return setStatus("Save the order first.");
+  window.open(`/service-projector/${id}?id=${encodeURIComponent(id)}`, "_blank");
+}
+
+function openLivePreview() {
+  const id = document.getElementById("orderId").value.trim();
+  if (!id) return setStatus("Save the order first.");
+  window.open(`/live-preview/${id}?id=${encodeURIComponent(id)}`, "_blank");
+}
+
+function openRemote() {
+  const id = document.getElementById("orderId").value.trim();
+  if (!id) return setStatus("Save the order first.");
+  window.open(`/remote/${id}?id=${encodeURIComponent(id)}`, "_blank");
+}
+
+async function generateQr() {
+  const id = document.getElementById("orderId").value.trim();
+  if (!id) return setStatus("Save or load a service order first.");
+  const baseUrl = document.getElementById("baseUrl").value.trim();
+  const qs = baseUrl ? `?baseUrl=${encodeURIComponent(baseUrl)}` : "";
+  const res = await fetch(`/pairing/remote/${id}${qs}`);
+  const data = await res.json();
+  if (data.error) {
+    setStatus(data);
+    return;
+  }
+  document.getElementById("qrImage").src = data.qrDataUrl;
+  document.getElementById("qrLink").textContent = data.remoteUrl;
+  setStatus(`QR pairing ready for ${id}`);
+}
+
+document.getElementById("songSearch").addEventListener("input", (e) => renderSongs(e.target.value));
+document.getElementById("addCustomBtn").addEventListener("click", addCustomItem);
+document.getElementById("saveBtn").addEventListener("click", saveOrder);
+document.getElementById("newOrderBtn").addEventListener("click", newOrder);
+document.getElementById("projectorBtn").addEventListener("click", openProjector);
+document.getElementById("liveBtn").addEventListener("click", openLivePreview);
+document.getElementById("remoteBtn").addEventListener("click", openRemote);
+document.getElementById("qrBtn").addEventListener("click", generateQr);
+
+loadSongs();
+loadOrders();
+</script>
+</body>
+</html>

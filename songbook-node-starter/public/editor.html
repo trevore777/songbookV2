@@ -1,0 +1,320 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Songbook Editor</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    body { font-family: Arial, sans-serif; margin: 0; background: #f5f5f5; color: #222; }
+    .wrap { max-width: 1280px; margin: 0 auto; padding: 20px; }
+    h1 { margin-top: 0; }
+    .grid { display: grid; grid-template-columns: 340px 1fr; gap: 20px; }
+    .panel { background: white; border-radius: 12px; padding: 16px; box-shadow: 0 1px 4px rgba(0,0,0,.08); }
+    input, textarea, button { font: inherit; }
+    input, textarea { width: 100%; padding: 10px; box-sizing: border-box; margin-bottom: 10px; }
+    textarea { min-height: 560px; font-family: Menlo, Consolas, monospace; }
+    button { padding: 10px 14px; cursor: pointer; }
+    .song-item { padding: 10px; border-bottom: 1px solid #eee; cursor: pointer; }
+    .song-item:hover, .song-item.active { background: #eef6ff; }
+    .muted { color: #666; font-size: 14px; }
+    .row { display: flex; gap: 10px; flex-wrap: wrap; }
+    .row > * { flex: 1; }
+    pre { white-space: pre-wrap; background: #fafafa; padding: 12px; border-radius: 8px; }
+    .preview { background: #111; color: white; padding: 20px; border-radius: 12px; min-height: 220px; }
+    .slide-title { font-size: 18px; color: #ccc; margin-bottom: 16px; text-transform: uppercase; letter-spacing: 0.08em; }
+    .slide-line { font-size: 36px; line-height: 1.5; margin: 6px 0; }
+    .meta { font-size: 13px; color: #777; }
+    a { color: inherit; }
+    @media (max-width: 900px) { .grid { grid-template-columns: 1fr; } .slide-line { font-size: 26px; } }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>Songbook Editor</h1>
+    <p class="muted">Keeps song number, scriptures, video example URL, ChordPro source, JSON export, and a projector-ready preview.</p>
+
+    <div class="grid">
+      <div class="panel">
+        <input id="search" placeholder="Search by title, number, scripture..." />
+        <div id="songList"></div>
+      </div>
+
+      <div class="panel">
+        <div class="row">
+          <div><input id="songId" placeholder="song id" /></div>
+          <div><input id="steps" type="number" value="0" /></div>
+          <div><button id="transposeBtn">Transpose</button></div>
+          <div><button id="newBtn">New Song</button></div>
+        </div>
+
+        <div class="row">
+          <div style="flex:2">
+            <input id="videoExample" placeholder="Video example URL (optional)" />
+          </div>
+          <div style="flex:1">
+            <button id="watchBtn">Open Video</button>
+          </div>
+        </div>
+
+        <textarea id="raw"></textarea>
+
+        <div class="row">
+          <button id="saveBtn">Save Song</button>
+          <button id="refreshBtn">Refresh List</button>
+          <button id="jsonBtn">Preview SwiftUI JSON</button>
+          <button id="projectorBtn">Open Projector</button>
+        </div>
+
+        <h3>Status</h3>
+        <pre id="status">Ready.</pre>
+
+        <h3>SwiftUI JSON Preview</h3>
+        <pre id="jsonPreview">{}</pre>
+
+        <h3>Projector Preview</h3>
+        <div class="preview">
+          <div class="slide-title" id="previewTitle">Preview</div>
+          <div id="previewLines"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const searchEl = document.getElementById("search");
+    const songListEl = document.getElementById("songList");
+    const rawEl = document.getElementById("raw");
+    const songIdEl = document.getElementById("songId");
+    const stepsEl = document.getElementById("steps");
+    const statusEl = document.getElementById("status");
+    const jsonPreviewEl = document.getElementById("jsonPreview");
+    const previewTitleEl = document.getElementById("previewTitle");
+    const previewLinesEl = document.getElementById("previewLines");
+    const videoExampleEl = document.getElementById("videoExample");
+    let songs = [];
+    let currentId = "";
+
+    function setStatus(value) {
+      statusEl.textContent = typeof value === "string" ? value : JSON.stringify(value, null, 2);
+    }
+
+    function upsertVideoMetadata(raw, url) {
+      const normalized = String(url || "").trim();
+      const lines = raw.replace(/\r\n/g, "\n").split("\n");
+      const videoIndex = lines.findIndex(line => /^\{video_example\s*:.*\}$/i.test(line.trim()));
+
+      if (normalized) {
+        const line = `{video_example: ${normalized}}`;
+        if (videoIndex >= 0) {
+          lines[videoIndex] = line;
+        } else {
+          let insertAt = 0;
+          while (insertAt < lines.length && /^\{[^}]+\}$/.test(lines[insertAt].trim())) {
+            insertAt += 1;
+          }
+          lines.splice(insertAt, 0, line);
+        }
+      } else if (videoIndex >= 0) {
+        lines.splice(videoIndex, 1);
+      }
+
+      return lines.join("\n").replace(/\n{3,}/g, "\n\n");
+    }
+
+    function getVideoFromRaw(raw) {
+      const match = raw.match(/^\{video_example\s*:\s*(.*?)\}$/im) || raw.match(/^\{video\s*:\s*(.*?)\}$/im);
+      return match ? match[1].trim() : "";
+    }
+
+    async function loadSongs() {
+      const res = await fetch("/songs");
+      const data = await res.json();
+      songs = data.songs || [];
+      renderSongs(searchEl.value || "");
+    }
+
+    function renderSongs(query) {
+      const q = query.toLowerCase().trim();
+      const filtered = songs.filter(song =>
+        !q ||
+        (song.title || "").toLowerCase().includes(q) ||
+        (song.id || "").toLowerCase().includes(q) ||
+        String(song.songNumber || "").includes(q) ||
+        (song.scriptures || []).join(" ").toLowerCase().includes(q)
+      );
+
+      songListEl.innerHTML = filtered.map(song => `
+        <div class="song-item ${song.id === currentId ? 'active' : ''}" data-id="${song.id}">
+          <strong>${song.songNumber ? song.songNumber + ". " : ""}${song.title}</strong><br />
+          <span class="muted">${song.id}${song.key ? " • Key " + song.key : ""}</span><br />
+          <span class="meta">${(song.scriptures || []).join(", ")}</span>
+          ${song.videoExample ? `<br><span class="meta">Video example linked</span>` : ""}
+        </div>
+      `).join("");
+
+      document.querySelectorAll(".song-item").forEach(el => {
+        el.addEventListener("click", () => openSong(el.dataset.id));
+      });
+    }
+
+    async function openSong(id) {
+      const res = await fetch(`/songs/${id}`);
+      const data = await res.json();
+      currentId = id;
+      songIdEl.value = data.id;
+      rawEl.value = data.raw;
+      videoExampleEl.value = data.videoExample || getVideoFromRaw(data.raw) || "";
+      updateJson(data);
+      await updateProjectorPreview(id);
+      renderSongs(searchEl.value || "");
+      setStatus(`Loaded ${data.title}`);
+    }
+
+    async function saveSong() {
+      const id = songIdEl.value.trim();
+      let raw = rawEl.value;
+      if (!id) {
+        setStatus("Song id is required.");
+        return;
+      }
+
+      raw = upsertVideoMetadata(raw, videoExampleEl.value);
+      rawEl.value = raw;
+
+      const res = await fetch(`/songs/${id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ raw })
+      });
+      const data = await res.json();
+      setStatus(data);
+      await loadSongs();
+      currentId = data.id || id;
+      await updateProjectorPreview(currentId);
+      updateJson({
+        id: currentId,
+        title: data.title || "",
+        songNumber: data.songNumber || null,
+        key: "",
+        categories: [],
+        scriptures: [],
+        videoExample: videoExampleEl.value.trim(),
+        raw
+      });
+    }
+
+    async function transposeSong() {
+      const id = songIdEl.value.trim();
+      const steps = parseInt(stepsEl.value || "0", 10);
+      if (!id) {
+        setStatus("Load a song first.");
+        return;
+      }
+
+      const res = await fetch(`/songs/${id}/transpose/${steps}`);
+      const data = await res.json();
+      rawEl.value = data.raw || "";
+      videoExampleEl.value = getVideoFromRaw(data.raw || "");
+      setStatus(data);
+      updateJson({
+        id,
+        title: data.title,
+        songNumber: null,
+        key: data.transposedKey,
+        categories: [],
+        scriptures: [],
+        videoExample: videoExampleEl.value.trim(),
+        raw: data.raw
+      });
+      const preview = await fetch(`/songs/${id}/projector`);
+      const previewData = await preview.json();
+      renderSlide(previewData);
+    }
+
+    function updateJson(data) {
+      jsonPreviewEl.textContent = JSON.stringify({
+        id: data.id,
+        title: data.title,
+        songNumber: data.songNumber,
+        key: data.key,
+        categories: data.categories || [],
+        scriptures: data.scriptures || [],
+        videoExample: data.videoExample || null,
+        lyricsChordPro: data.raw
+      }, null, 2);
+    }
+
+    async function updateProjectorPreview(id) {
+      if (!id) return;
+      const res = await fetch(`/songs/${id}/projector`);
+      const data = await res.json();
+      renderSlide(data);
+    }
+
+    function renderSlide(data) {
+      previewTitleEl.textContent = `${data.songNumber ? data.songNumber + ". " : ""}${data.title}`;
+      const slide = (data.slides || [])[0];
+      previewLinesEl.innerHTML = slide
+        ? slide.lines.map(line => `<div class="slide-line">${line}</div>`).join("")
+        : "<div class='slide-line'>No slide content</div>";
+    }
+
+    function previewJson() {
+      const raw = upsertVideoMetadata(rawEl.value, videoExampleEl.value);
+      rawEl.value = raw;
+      updateJson({
+        id: songIdEl.value.trim(),
+        title: "",
+        songNumber: null,
+        key: "",
+        categories: [],
+        scriptures: [],
+        videoExample: videoExampleEl.value.trim(),
+        raw
+      });
+      setStatus("JSON preview updated.");
+    }
+
+    function newSong() {
+      currentId = "";
+      songIdEl.value = "";
+      videoExampleEl.value = "";
+      rawEl.value = "{title: New Song}\n{songnumber: 100}\n{key: C}\n{categories: general}\n{scriptures: Psalm 100:1}\n\n[Verse]\n[C]Start here";
+      jsonPreviewEl.textContent = "{}";
+      previewTitleEl.textContent = "Preview";
+      previewLinesEl.innerHTML = "";
+      renderSongs(searchEl.value || "");
+      setStatus("New song template loaded.");
+    }
+
+    function openProjector() {
+      const id = songIdEl.value.trim();
+      if (!id) {
+        setStatus("Load a song first.");
+        return;
+      }
+      window.open(`/projector/${id}?id=${encodeURIComponent(id)}`, "_blank");
+    }
+
+    function openVideo() {
+      const url = videoExampleEl.value.trim();
+      if (!url) {
+        setStatus("No video example URL set for this song.");
+        return;
+      }
+      window.open(url, "_blank");
+    }
+
+    searchEl.addEventListener("input", () => renderSongs(searchEl.value || ""));
+    document.getElementById("saveBtn").addEventListener("click", saveSong);
+    document.getElementById("refreshBtn").addEventListener("click", loadSongs);
+    document.getElementById("transposeBtn").addEventListener("click", transposeSong);
+    document.getElementById("jsonBtn").addEventListener("click", previewJson);
+    document.getElementById("newBtn").addEventListener("click", newSong);
+    document.getElementById("projectorBtn").addEventListener("click", openProjector);
+    document.getElementById("watchBtn").addEventListener("click", openVideo);
+
+    loadSongs();
+  </script>
+</body>
+</html>

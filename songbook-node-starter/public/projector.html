@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Projector View</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    html, body { margin: 0; padding: 0; background: #000; color: #fff; font-family: Arial, sans-serif; height: 100%; }
+    .page { min-height: 100vh; display: flex; flex-direction: column; justify-content: center; padding: 4vh 4vw; box-sizing: border-box; }
+    .title { font-size: 2vw; color: #bdbdbd; margin-bottom: 2vh; text-transform: uppercase; letter-spacing: .08em; }
+    .line { font-size: 3.6vw; line-height: 1.35; margin: 0.18em 0; font-weight: 700; white-space: pre-wrap; font-family: Menlo, Consolas, monospace; }
+    .controls { position: fixed; bottom: 18px; right: 18px; display: flex; gap: 10px; background: rgba(20,20,20,.75); padding: 10px; border-radius: 12px; }
+    button { font: inherit; padding: 10px 14px; border: none; border-radius: 8px; background: #fff; color: #000; cursor: pointer; }
+    .counter { position: fixed; top: 18px; right: 18px; background: rgba(20,20,20,.75); padding: 10px 14px; border-radius: 12px; color: #ddd; }
+    @media (max-width: 900px) { .title { font-size: 18px; } .line { font-size: 26px; } }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <div class="title" id="title">Loading…</div>
+    <div id="lines"></div>
+  </div>
+
+  <div class="counter" id="counter"></div>
+
+  <div class="controls">
+    <button id="prevBtn">Prev</button>
+    <button id="nextBtn">Next</button>
+    <button id="fsBtn">Full Screen</button>
+  </div>
+
+  <script>
+    const params = new URLSearchParams(window.location.search);
+    const pathParts = window.location.pathname.split("/");
+    const songId = params.get("id") || pathParts[pathParts.length - 1];
+    let slides = [];
+    let index = 0;
+    const titleEl = document.getElementById("title");
+    const linesEl = document.getElementById("lines");
+    const counterEl = document.getElementById("counter");
+
+    function escapeHtml(value) {
+      return String(value)
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("'", "&#039;");
+    }
+
+    async function loadSong() {
+      const res = await fetch(`/songs/${songId}/projector`);
+      const data = await res.json();
+      slides = data.slides || [];
+      titleEl.textContent = `${data.songNumber ? data.songNumber + ". " : ""}${data.title}`;
+      render();
+    }
+
+    function render() {
+      const slide = slides[index] || { lines: ["No content"] };
+      linesEl.innerHTML = slide.lines.map(line => `<div class="line">${escapeHtml(line)}</div>`).join("");
+      counterEl.textContent = `Slide ${index + 1} / ${Math.max(slides.length, 1)}`;
+    }
+
+    function prev() { if (index > 0) index -= 1; render(); }
+    function next() { if (index < slides.length - 1) index += 1; render(); }
+    async function fullScreen() { const el = document.documentElement; if (el.requestFullscreen) await el.requestFullscreen(); }
+
+    document.getElementById("prevBtn").addEventListener("click", prev);
+    document.getElementById("nextBtn").addEventListener("click", next);
+    document.getElementById("fsBtn").addEventListener("click", fullScreen);
+
+    window.addEventListener("keydown", (e) => {
+      if (e.key === "ArrowRight" || e.key === " " || e.key === "PageDown") next();
+      if (e.key === "ArrowLeft" || e.key === "PageUp") prev();
+      if (e.key.toLowerCase() === "f") fullScreen();
+    });
+
+    loadSong();
+  </script>
+</body>
+</html>

@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Song View</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    body { font-family: Arial, sans-serif; margin: 0; background: #fafafa; color: #222; }
+    .wrap { max-width: 1100px; margin: 0 auto; padding: 24px; }
+    .card { background: white; border-radius: 14px; padding: 20px; box-shadow: 0 1px 4px rgba(0,0,0,.08); }
+    .title { font-size: 30px; margin-bottom: 6px; }
+    .meta { color: #666; margin-bottom: 16px; }
+    .row { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 16px; }
+    button { font: inherit; padding: 10px 14px; cursor: pointer; }
+    pre { white-space: pre-wrap; font-family: Menlo, Consolas, monospace; font-size: 20px; line-height: 1.55; overflow-x: auto; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="card">
+      <div id="title" class="title">Loading…</div>
+      <div id="meta" class="meta"></div>
+      <div class="row">
+        <button id="watchBtn">Open Video Example</button>
+        <button id="projectorBtn">Open Projector View</button>
+      </div>
+      <pre id="content"></pre>
+    </div>
+  </div>
+
+  <script>
+    const params = new URLSearchParams(window.location.search);
+    const songId = params.get("id") || window.location.pathname.split("/").pop();
+    let song = null;
+
+    async function loadSong() {
+      const res = await fetch(`/songs/${songId}`);
+      song = await res.json();
+      document.getElementById("title").textContent = `${song.songNumber ? song.songNumber + ". " : ""}${song.title}`;
+      document.getElementById("meta").textContent = [song.key ? `Key ${song.key}` : "", (song.scriptures || []).join(", "), song.videoExample ? "Video example linked" : ""].filter(Boolean).join(" • ");
+      document.getElementById("content").textContent = song.raw || "";
+    }
+
+    function openVideo() { if (!song || !song.videoExample) return; window.open(song.videoExample, "_blank"); }
+    function openProjector() { if (!song) return; window.open(`/projector/${song.id}?id=${encodeURIComponent(song.id)}`, "_blank"); }
+
+    document.getElementById("watchBtn").addEventListener("click", openVideo);
+    document.getElementById("projectorBtn").addEventListener("click", openProjector);
+    loadSong();
+  </script>
+</body>
+</html>

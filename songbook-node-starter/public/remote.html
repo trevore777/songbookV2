@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Phone Remote</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    body { font-family: Arial, sans-serif; margin: 0; background: #0d1117; color: #fff; }
+    .wrap { max-width: 560px; margin: 0 auto; padding: 20px; }
+    .card { background: #161b22; border-radius: 16px; padding: 16px; margin-bottom: 16px; }
+    .title { font-size: 22px; margin-bottom: 8px; }
+    .meta { color: #aab1b8; margin-bottom: 10px; }
+    .line { font-size: 24px; line-height: 1.4; margin: .35em 0; font-weight: 700; }
+    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    button { width: 100%; padding: 16px; font-size: 18px; font-weight: 700; border: none; border-radius: 12px; cursor: pointer; }
+    .small { font-size: 14px; color: #9aa4af; }
+  </style>
+</head>
+<body>
+<div class="wrap">
+  <div class="card">
+    <div class="title">Phone Remote</div>
+    <div class="small">Use this on your phone to control the service projector and live preview.</div>
+  </div>
+
+  <div class="card">
+    <div id="serviceTitle" class="title">Loading…</div>
+    <div id="meta" class="meta"></div>
+    <div id="lines"></div>
+  </div>
+
+  <div class="grid">
+    <button id="prevItemBtn">Prev Item</button>
+    <button id="nextItemBtn">Next Item</button>
+    <button id="prevSlideBtn">Prev Slide</button>
+    <button id="nextSlideBtn">Next Slide</button>
+  </div>
+</div>
+
+<script>
+const params = new URLSearchParams(window.location.search);
+const serviceId = params.get("id") || window.location.pathname.split("/").pop();
+let order = null;
+let state = { itemIndex: 0, slideIndex: 0 };
+let lastSeen = "";
+
+async function loadOrder() {
+  const res = await fetch(`/service-orders/${serviceId}/view`);
+  order = await res.json();
+  document.getElementById("serviceTitle").textContent = order.title || serviceId;
+  await syncState();
+  render();
+  setInterval(syncState, 1000);
+}
+
+async function syncState() {
+  const res = await fetch(`/remote-state/${serviceId}`);
+  const data = await res.json();
+  if (data.updatedAt !== lastSeen || data.itemIndex !== state.itemIndex || data.slideIndex !== state.slideIndex) {
+    state = data;
+    lastSeen = data.updatedAt || "";
+    render();
+  }
+}
+
+function currentItem() {
+  return (order.items || [])[state.itemIndex] || { title: "No item", slides: [] };
+}
+
+function currentSlide() {
+  const item = currentItem();
+  return (item.slides || [])[state.slideIndex] || { lines: ["No content"] };
+}
+
+function render() {
+  if (!order) return;
+  const item = currentItem();
+  const slide = currentSlide();
+  document.getElementById("meta").textContent = `Item ${state.itemIndex + 1}/${(order.items || []).length} • Slide ${state.slideIndex + 1}/${Math.max((item.slides || []).length, 1)} • ${item.title || "Item"}`;
+  document.getElementById("lines").innerHTML = (slide.lines || []).map(line => `<div class="line">${line}</div>`).join("");
+}
+
+async function action(name) {
+  await fetch(`/remote-state/${serviceId}/action`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ action: name })
+  });
+  await syncState();
+}
+
+document.getElementById("prevItemBtn").addEventListener("click", () => action("prevItem"));
+document.getElementById("nextItemBtn").addEventListener("click", () => action("nextItem"));
+document.getElementById("prevSlideBtn").addEventListener("click", () => action("prevSlide"));
+document.getElementById("nextSlideBtn").addEventListener("click", () => action("nextSlide"));
+
+loadOrder();
+</script>
+</body>
+</html>

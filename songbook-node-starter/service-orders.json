@@ -1,0 +1,50 @@
+[
+  {
+    "id": "sample-sunday-service",
+    "title": "Sample Sunday Service",
+    "date": "",
+    "notes": "Starter service order",
+    "items": [
+      {
+        "type": "custom",
+        "title": "Welcome",
+        "notes": "Welcome everyone\nPlease stand together",
+        "position": 1,
+        "transpose": 0,
+        "musicianKeyOverride": ""
+      },
+      {
+        "type": "song",
+        "songId": "the-windows-of-heaven-are-open",
+        "title": "The Windows of Heaven Are Open",
+        "position": 2,
+        "transpose": 0,
+        "musicianKeyOverride": ""
+      },
+      {
+        "type": "song",
+        "songId": "into-my-heart",
+        "title": "Into My Heart",
+        "position": 3,
+        "transpose": 2,
+        "musicianKeyOverride": "A"
+      },
+      {
+        "type": "custom",
+        "title": "Prayer",
+        "notes": "Let's pray together",
+        "position": 4,
+        "transpose": 0,
+        "musicianKeyOverride": ""
+      },
+      {
+        "type": "song",
+        "songId": "thank-you-lord-for-saving-my-soul",
+        "title": "Thank You Lord for Saving My Soul",
+        "position": 5,
+        "transpose": -1,
+        "musicianKeyOverride": "F#"
+      }
+    ]
+  }
+]

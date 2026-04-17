@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Service Projector</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    html, body { margin: 0; padding: 0; background: #000; color: #fff; font-family: Arial, sans-serif; height: 100%; }
+    .page { min-height: 100vh; display: flex; flex-direction: column; justify-content: center; padding: 4vh 4vw; box-sizing: border-box; }
+    .title { font-size: 2vw; color: #c9c9c9; margin-bottom: 2vh; letter-spacing: .06em; text-transform: uppercase; }
+    .line { font-size: 3.8vw; line-height: 1.38; margin: .2em 0; font-weight: 700; white-space: pre-wrap; font-family: Menlo, Consolas, monospace; }
+    .hud { position: fixed; top: 18px; right: 18px; background: rgba(20,20,20,.76); padding: 10px 14px; border-radius: 12px; color: #ddd; }
+    .controls { position: fixed; bottom: 18px; right: 18px; display: flex; gap: 10px; background: rgba(20,20,20,.76); padding: 10px; border-radius: 12px; }
+    button { font: inherit; padding: 10px 14px; border-radius: 8px; border: none; cursor: pointer; }
+    @media (max-width: 900px) { .title { font-size: 18px; } .line { font-size: 26px; } }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <div class="title" id="title">Loading…</div>
+    <div id="lines"></div>
+  </div>
+  <div class="hud" id="hud"></div>
+  <div class="controls">
+    <button id="prevItemBtn">Prev Item</button>
+    <button id="prevSlideBtn">Prev Slide</button>
+    <button id="nextSlideBtn">Next Slide</button>
+    <button id="nextItemBtn">Next Item</button>
+    <button id="fsBtn">Full Screen</button>
+  </div>
+
+<script>
+function escapeHtml(value) {
+  return String(value)
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
+}
+const params = new URLSearchParams(window.location.search);
+const serviceId = params.get("id") || window.location.pathname.split("/").pop();
+let order = null;
+let state = { itemIndex: 0, slideIndex: 0 };
+let lastSeen = "";
+
+async function loadOrder() {
+  const res = await fetch(`/service-orders/${serviceId}/view`);
+  order = await res.json();
+  await syncState();
+  render();
+  setInterval(syncState, 1000);
+}
+
+async function syncState() {
+  const res = await fetch(`/remote-state/${serviceId}`);
+  const data = await res.json();
+  if (data.updatedAt !== lastSeen || data.itemIndex !== state.itemIndex || data.slideIndex !== state.slideIndex) {
+    state = data;
+    lastSeen = data.updatedAt || "";
+    render();
+  }
+}
+
+function currentItem() { return (order.items || [])[state.itemIndex] || { title: "No item", slides: [] }; }
+function currentSlide() { const item = currentItem(); return (item.slides || [])[state.slideIndex] || { lines: ["No content"] }; }
+
+function render() {
+  if (!order) return;
+  const item = currentItem();
+  const slide = currentSlide();
+  document.getElementById("title").textContent = `${state.itemIndex + 1}. ${item.title || "Item"}`;
+  document.getElementById("lines").innerHTML = (slide.lines || []).map(line => `<div class="line">${escapeHtml(line)}</div>`).join("");
+  document.getElementById("hud").textContent = `Item ${state.itemIndex + 1}/${(order.items || []).length} • Slide ${state.slideIndex + 1}/${Math.max((item.slides || []).length, 1)}`;
+}
+
+async function action(name) {
+  await fetch(`/remote-state/${serviceId}/action`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: name }) });
+  await syncState();
+}
+
+async function fullScreen() { if (document.documentElement.requestFullscreen) { await document.documentElement.requestFullscreen(); } }
+
+document.getElementById("prevItemBtn").addEventListener("click", () => action("prevItem"));
+document.getElementById("nextItemBtn").addEventListener("click", () => action("nextItem"));
+document.getElementById("prevSlideBtn").addEventListener("click", () => action("prevSlide"));
+document.getElementById("nextSlideBtn").addEventListener("click", () => action("nextSlide"));
+document.getElementById("fsBtn").addEventListener("click", fullScreen);
+window.addEventListener("keydown", (e) => {
+  if (e.key === "ArrowRight" || e.key === " " || e.key === "PageDown") action("nextSlide");
+  if (e.key === "ArrowLeft" || e.key === "PageUp") action("prevSlide");
+  if (e.key === "ArrowDown") action("nextItem");
+  if (e.key === "ArrowUp") action("prevItem");
+  if (e.key.toLowerCase() === "f") fullScreen();
+});
+loadOrder();
+</script>
+</body>
+</html>

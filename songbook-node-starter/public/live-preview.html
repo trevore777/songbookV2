@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Live Preview</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    body { margin: 0; font-family: Arial, sans-serif; background: #111; color: #fff; }
+    .grid { display: grid; grid-template-columns: 1fr 1fr; min-height: 100vh; }
+    .panel { padding: 24px; box-sizing: border-box; overflow: auto; }
+    .left { background: #1b1b1b; border-right: 1px solid #333; }
+    .right { background: #000; }
+    .title { font-size: 22px; color: #cfcfcf; text-transform: uppercase; letter-spacing: .06em; margin-bottom: 18px; }
+    .meta { color: #8f8f8f; margin-bottom: 16px; }
+    .raw { white-space: pre-wrap; font-family: Menlo, Consolas, monospace; font-size: 22px; line-height: 1.6; }
+    .line { font-size: 42px; line-height: 1.35; margin: .2em 0; font-weight: 700; white-space: pre-wrap; font-family: Menlo, Consolas, monospace; }
+    .hud { position: fixed; top: 14px; right: 14px; background: rgba(20,20,20,.82); padding: 10px 14px; border-radius: 12px; }
+    .controls { position: fixed; bottom: 14px; right: 14px; display: flex; gap: 8px; background: rgba(20,20,20,.82); padding: 10px; border-radius: 12px; }
+    button { font: inherit; padding: 10px 12px; border: none; border-radius: 8px; cursor: pointer; }
+    @media (max-width: 1000px) { .grid { grid-template-columns: 1fr; } .line { font-size: 28px; } .raw { font-size: 18px; } }
+  </style>
+</head>
+<body>
+  <div class="grid">
+    <div class="panel left">
+      <div class="title">Musician View</div>
+      <div id="leftMeta" class="meta"></div>
+      <div id="leftRaw" class="raw"></div>
+    </div>
+    <div class="panel right">
+      <div class="title">Projector View</div>
+      <div id="rightMeta" class="meta"></div>
+      <div id="rightLines"></div>
+    </div>
+  </div>
+
+  <div class="hud" id="hud"></div>
+  <div class="controls">
+    <button id="prevItemBtn">Prev Item</button>
+    <button id="prevSlideBtn">Prev Slide</button>
+    <button id="nextSlideBtn">Next Slide</button>
+    <button id="nextItemBtn">Next Item</button>
+  </div>
+
+<script>
+function escapeHtml(value) {
+  return String(value)
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
+}
+const params = new URLSearchParams(window.location.search);
+const serviceId = params.get("id") || window.location.pathname.split("/").pop();
+let order = null;
+let state = { itemIndex: 0, slideIndex: 0 };
+let lastSeen = "";
+
+async function loadOrder() {
+  const res = await fetch(`/service-orders/${serviceId}/view`);
+  order = await res.json();
+  await syncState();
+  render();
+  setInterval(syncState, 1000);
+}
+
+async function syncState() {
+  const res = await fetch(`/remote-state/${serviceId}`);
+  const data = await res.json();
+  if (data.updatedAt !== lastSeen || data.itemIndex !== state.itemIndex || data.slideIndex !== state.slideIndex) {
+    state = data;
+    lastSeen = data.updatedAt || "";
+    render();
+  }
+}
+
+function currentItem() { return (order.items || [])[state.itemIndex] || { title: "No item", slides: [] }; }
+function currentSlide() { const item = currentItem(); return (item.slides || [])[state.slideIndex] || { lines: ["No content"] }; }
+
+function render() {
+  if (!order) return;
+  const item = currentItem();
+  const slide = currentSlide();
+  const musicianKey = item.musicianKey || item.projectorKey || "";
+  const projectorKey = item.projectorKey || "";
+
+  document.getElementById("leftMeta").textContent = `${state.itemIndex + 1}. ${item.title || "Item"}${musicianKey ? " • Musician key " + musicianKey : ""}${item.originalKey ? " • Original " + item.originalKey : ""}`;
+  document.getElementById("leftRaw").textContent = item.musicianRaw || item.notes || "";
+
+  document.getElementById("rightMeta").textContent = `${state.itemIndex + 1}. ${item.title || "Item"}${projectorKey ? " • Projector key " + projectorKey : ""}`;
+  document.getElementById("rightLines").innerHTML = (slide.lines || []).map(line => `<div class="line">${escapeHtml(line)}</div>`).join("");
+
+  document.getElementById("hud").textContent = `Item ${state.itemIndex + 1}/${(order.items || []).length} • Slide ${state.slideIndex + 1}/${Math.max((item.slides || []).length, 1)}`;
+}
+
+async function action(name) {
+  await fetch(`/remote-state/${serviceId}/action`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: name }) });
+  await syncState();
+}
+
+document.getElementById("prevItemBtn").addEventListener("click", () => action("prevItem"));
+document.getElementById("nextItemBtn").addEventListener("click", () => action("nextItem"));
+document.getElementById("prevSlideBtn").addEventListener("click", () => action("prevSlide"));
+document.getElementById("nextSlideBtn").addEventListener("click", () => action("nextSlide"));
+window.addEventListener("keydown", (e) => {
+  if (e.key === "ArrowRight" || e.key === " " || e.key === "PageDown") action("nextSlide");
+  if (e.key === "ArrowLeft" || e.key === "PageUp") action("prevSlide");
+  if (e.key === "ArrowDown") action("nextItem");
+  if (e.key === "ArrowUp") action("prevItem");
+});
+loadOrder();
+</script>
+</body>
+</html>
